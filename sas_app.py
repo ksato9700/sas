@@ -16,6 +16,9 @@ import urllib2
 import urlparse
 import calendar
 
+from openid.server import server
+from openid.store.filestore import FileOpenIDStore
+
 #
 # constant
 #
@@ -65,7 +68,12 @@ class SasApp:
         self.backend = backend
         self.debug = debug
 
+        store = FileOpenIDStore('store')
+        oidurl = 'aaaa'
+        self.oidserver = server.Server(store, oidurl)
+
     def _create_response(self, environ):
+        print environ
         path_info = environ['PATH_INFO']
         if_modified_since = environ.get('HTTP_IF_MODIFIED_SINCE','').split(';')[0]
 
@@ -88,7 +96,7 @@ class SasApp:
                 f = open(path, 'rb')
             except Exception as e:
                 # print e
-                return (500, [], [])
+                return (404, [], [])
 
             fs = os.fstat(f.fileno())
             if if_modified_since and \
