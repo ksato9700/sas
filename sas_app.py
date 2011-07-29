@@ -67,13 +67,18 @@ class SasApp:
     def __init__(self, backend, debug):
         self.backend = backend
         self.debug = debug
+        self.oidserver = None
 
+    def _set_oidserver(self, environ):
         store = FileOpenIDStore('store')
-        oidurl = 'aaaa'
+        baseurl = "%s://%s/" % (environ['wsgi.url_scheme'], environ['HTTP_HOST'])
+        oidurl = baseurl + 'openid'
         self.oidserver = server.Server(store, oidurl)
 
     def _create_response(self, environ):
-        print environ
+        if not self.oidserver:
+            self._set_oidserver(environ)
+
         path_info = environ['PATH_INFO']
         if_modified_since = environ.get('HTTP_IF_MODIFIED_SINCE','').split(';')[0]
 
