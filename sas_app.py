@@ -6,6 +6,9 @@
 #
 # import
 #
+from mako.lookup import TemplateLookup
+from mako.exceptions import RichTraceback
+
 from wsgiref.handlers import format_date_time
 from wsgiref.util import request_uri, shift_path_info, FileWrapper
 
@@ -15,6 +18,7 @@ import urllib
 import urllib2
 import urlparse
 import calendar
+import Cookie
 
 from openid.server import server
 from openid.store.filestore import FileOpenIDStore
@@ -22,6 +26,10 @@ from openid.store.filestore import FileOpenIDStore
 #
 # constant
 #
+mylookup = TemplateLookup(directories=['templates'], format_exceptions=True,
+                          output_encoding='utf-8', encoding_errors='replace',
+                          module_directory='/tmp/sas_mako_modules')
+                          
 _content_type_map = {
     ".ico": "image/x-icon",
     ".jpg": "image/jpeg",
@@ -59,6 +67,9 @@ def _create_response_headers(content_type, content_length, last_modified=None):
 def _html_response(code, message):
     return (code, _create_response_headers("text/html", len(message)),  message)
 
+def _http_redirect(location, headers=[]):
+    headers.append(('Location', location))
+    return (301, headers, [])
 
 #
 # class
@@ -71,16 +82,38 @@ class SasApp:
 
     def _set_oidserver(self, environ):
         store = FileOpenIDStore('store')
-        baseurl = "%s://%s/" % (environ['wsgi.url_scheme'], environ['HTTP_HOST'])
-        oidurl = baseurl + 'openid'
+        self.baseurl = "%s://%s" % (environ['wsgi.url_scheme'], environ['HTTP_HOST'])
+        oidurl = self.baseurl + '/openid'
         self.oidserver = server.Server(store, oidurl)
-
+        
+    def _create_view(self, ttype, args):
+        try:
+            mytemplate = mylookup.get_template('%s.mako' % ttype)
+            return mytemplate.render(args=args)
+        except:
+            traceback = RichTraceback()
+            for (filename, lineno, function, line) in traceback.traceback:
+                print "File %s, line %s, in %s" % (filename, lineno, function)
+                print line, "\n"
+                print "%s: %s" % (str(traceback.error.__class__.__name__),
+                                  traceback.error)
+            
     def _create_response(self, environ):
         if not self.oidserver:
             self._set_oidserver(environ)
 
         path_info = environ['PATH_INFO']
         if_modified_since = environ.get('HTTP_IF_MODIFIED_SINCE','').split(';')[0]
+
+        cookie_str = environ.get('HTTP_COOKIE', '')
+        if cookie_str:
+            cookie = Cookie.SimpleCookie(cookie_str)
+            userid = cookie['userid'].value
+            username = cookie['username'].value
+            handle = cookie['handle'].value
+        else:
+            userid = None
+            username = None
 
         add_params = {}
         if environ.get('REQUEST_METHOD') == 'POST':
@@ -89,12 +122,48 @@ class SasApp:
             query_string = rfile.read(length)
             post_params = urlparse.parse_qs(query_string)
         else:
-            post_params = None
+            post_params = {}
 
         p0 = shift_path_info(environ)
 
-        if p0 in ("login"):
-            return (404, [], [])
+        if p0 == "":
+            if userid:
+                message = self._create_view("main", (self, userid, username, handle) )
+                return _html_response(200, message)
+            else:
+                return _http_redirect("/signin")
+        elif p0 == "signin":
+            message = self._create_view("signin", ("/", "/"))
+            return _html_response(200, message)
+        elif p0 == "signin_submit":
+            success_url = post_params['success_url'][0]
+            fail_url    = post_params['fail_url'][0]
+            if 'cancel' in post_params:
+                return _http_redirect(fail_url)
+
+            elif 'signout' in post_params:
+                headers = []
+                for key, morsel in cookie.items():
+                    morsel['expires'] = -86400
+                    headers.append(("Set-Cookie", morsel.OutputString()))
+                return _http_redirect(success_url, headers=headers)
+
+            elif 'username' in post_params:
+                username = post_params['username'][0]
+                password  = post_params['password'][0]
+
+                account_obj = self.backend.authenticate(username, password)
+                if account_obj:
+                    headers = [
+                        ('Set-Cookie', "userid=%d; path=/" % account_obj["userid"]),
+                        ('Set-Cookie', "handle=%s; path=/" % account_obj["handle"]),
+                        ('Set-Cookie', "username=%s; path=/" % username),
+                        ]
+                    return _http_redirect(success_url, headers=headers)
+                else:
+                    return _http_redirect(fail_url)
+            else:
+                return _http_redirect(fail_url)
         else:
             path = path_info[1:]
             try:
@@ -115,8 +184,8 @@ class SasApp:
                     ext = ''
                 else:
                     ext = path[dotindex:]
-                return (200, _create_response_headers(_content_type_map[ext], fs[6], fs.st_mtime), FileWrapper(f))
-        
+                return (200, _create_response_headers(_content_type_map[ext], fs[6], 
+                                                      fs.st_mtime), FileWrapper(f))
 
     def __call__(self, environ, start_response):
         code, headers, message = self._create_response(environ)
