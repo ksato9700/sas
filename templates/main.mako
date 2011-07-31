@@ -4,18 +4,18 @@
 ##
 <%page />
 <%
-sas, userid, username, handle = args
+baseurl, userid, username, handle = args
 %>
 <html>
 <head>
-<meta http-equiv="x-xrds-location" content="${sas.baseurl}/serveryadis">
+<meta http-equiv="x-xrds-location" content="${baseurl}/serveryadis">
 <title>Main</title>
 </head>
 <body>
 <table border="0">
 <tr><td>Username</td><td>${username}</td></tr>
 <tr><td>Handle</td><td>${handle}</td></tr>
-<tr><td>OpenID URL</td><td>${sas.baseurl}/id/${userid}</td></tr>
+<tr><td>OpenID URL</td><td>${baseurl}/id/${userid}</td></tr>
 </table>
 
 <form method="POST" action="/signin_submit">
